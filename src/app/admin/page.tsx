@@ -59,21 +59,59 @@ export default function AdminPage() {
     setError('');
 
     try {
-      const { data, error } = await supabase
+      // Try multiple approaches to find the admin
+      let data = null;
+      let error = null;
+
+      // First try: exact match
+      const { data: exactData, error: exactError } = await supabase
         .from('volunteers')
         .select('*')
-        .eq('username', username)
+        .eq('username', username.trim())
         .eq('password', password)
         .eq('role', 'admin')
         .single();
 
+      if (exactData) {
+        data = exactData;
+      } else {
+        // Second try: case insensitive username search
+        const { data: caseData, error: caseError } = await supabase
+          .from('volunteers')
+          .select('*')
+          .ilike('username', username.trim())
+          .eq('password', password)
+          .eq('role', 'admin')
+          .single();
+
+        if (caseData) {
+          data = caseData;
+        } else {
+          // Third try: without .single() to see if multiple results
+          const { data: multipleData, error: multipleError } = await supabase
+            .from('volunteers')
+            .select('*')
+            .ilike('username', username.trim())
+            .eq('password', password)
+            .eq('role', 'admin');
+
+          if (multipleData && multipleData.length > 0) {
+            data = multipleData[0]; // Take the first match
+          } else {
+            error = multipleError || caseError || exactError;
+          }
+        }
+      }
+
       if (error || !data) {
+        console.error('Admin login error:', error);
         setError('Invalid admin credentials');
         return;
       }
 
       setIsAuthenticated(true);
     } catch (err) {
+      console.error('Admin login exception:', err);
       setError('Login failed. Please try again.');
     } finally {
       setLoading(false);
@@ -292,7 +330,7 @@ export default function AdminPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 placeholder-gray-500"
                 placeholder="Enter admin username"
                 required
               />
@@ -306,7 +344,7 @@ export default function AdminPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 placeholder-gray-500"
                 placeholder="Enter admin password"
                 required
               />
@@ -393,7 +431,7 @@ export default function AdminPage() {
                     placeholder="Username"
                     value={newVolunteer.username}
                     onChange={(e) => setNewVolunteer(prev => ({ ...prev, username: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
                     required
                   />
                   <input
@@ -401,13 +439,13 @@ export default function AdminPage() {
                     placeholder="Password"
                     value={newVolunteer.password}
                     onChange={(e) => setNewVolunteer(prev => ({ ...prev, password: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
                     required
                   />
                   <select
                     value={newVolunteer.role}
                     onChange={(e) => setNewVolunteer(prev => ({ ...prev, role: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
                   >
                     <option value="volunteer">Volunteer</option>
                     <option value="admin">Admin</option>
@@ -481,7 +519,7 @@ export default function AdminPage() {
                     placeholder="Enter announcement message..."
                     value={newAnnouncement}
                     onChange={(e) => setNewAnnouncement(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
                     required
                   />
                   <button
@@ -534,7 +572,7 @@ export default function AdminPage() {
                     placeholder="Question"
                     value={newFAQ.question}
                     onChange={(e) => setNewFAQ(prev => ({ ...prev, question: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
                     required
                   />
                   <textarea
@@ -542,7 +580,7 @@ export default function AdminPage() {
                     value={newFAQ.answer}
                     onChange={(e) => setNewFAQ(prev => ({ ...prev, answer: e.target.value }))}
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
                     required
                   />
                   <button
@@ -568,13 +606,13 @@ export default function AdminPage() {
                           type="text"
                           value={editFAQData.question}
                           onChange={(e) => setEditFAQData(prev => ({ ...prev, question: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
                         />
                         <textarea
                           value={editFAQData.answer}
                           onChange={(e) => setEditFAQData(prev => ({ ...prev, answer: e.target.value }))}
                           rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
                         />
                         <div className="flex space-x-2">
                           <button

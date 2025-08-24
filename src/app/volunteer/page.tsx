@@ -53,6 +53,7 @@ export default function VolunteerPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
   const [updatingStudent, setUpdatingStudent] = useState<number | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -78,14 +79,49 @@ export default function VolunteerPage() {
     setError('');
 
     try {
-      const { data, error } = await supabase
+      // Try multiple approaches to find the volunteer
+      let data = null;
+      let error = null;
+
+      // First try: exact match
+      const { data: exactData, error: exactError } = await supabase
         .from('volunteers')
         .select('*')
-        .eq('username', username)
+        .eq('username', username.trim())
         .eq('password', password)
         .single();
 
+      if (exactData) {
+        data = exactData;
+      } else {
+        // Second try: case insensitive username search
+        const { data: caseData, error: caseError } = await supabase
+          .from('volunteers')
+          .select('*')
+          .ilike('username', username.trim())
+          .eq('password', password)
+          .single();
+
+        if (caseData) {
+          data = caseData;
+        } else {
+          // Third try: without .single() to see if multiple results
+          const { data: multipleData, error: multipleError } = await supabase
+            .from('volunteers')
+            .select('*')
+            .ilike('username', username.trim())
+            .eq('password', password);
+
+          if (multipleData && multipleData.length > 0) {
+            data = multipleData[0]; // Take the first match
+          } else {
+            error = multipleError || caseError || exactError;
+          }
+        }
+      }
+
       if (error || !data) {
+        console.error('Volunteer login error:', error);
         setError('Invalid username or password');
         return;
       }
@@ -93,6 +129,7 @@ export default function VolunteerPage() {
       setVolunteer(data);
       setIsAuthenticated(true);
     } catch (err) {
+      console.error('Volunteer login exception:', err);
       setError('Login failed. Please try again.');
     } finally {
       setLoading(false);
@@ -155,6 +192,7 @@ export default function VolunteerPage() {
 
       if (error) {
         console.error('Error updating student:', error);
+        setUpdateMessage({ type: 'error', message: 'Failed to update student status' });
         return;
       }
 
@@ -164,8 +202,20 @@ export default function VolunteerPage() {
           ? { ...student, [step]: value }
           : student
       ));
+
+      // Show success message
+      const student = students.find(s => s.id === studentId);
+      const stepName = STEPS.find(s => s.id === parseInt(step.replace('_status', '')))?.name || step;
+      setUpdateMessage({ 
+        type: 'success', 
+        message: `Updated ${student?.student_name}'s ${stepName} status to ${value ? 'completed' : 'pending'}` 
+      });
+
+      // Clear message after 3 seconds
+      setTimeout(() => setUpdateMessage(null), 3000);
     } catch (err) {
       console.error('Error updating student step:', err);
+      setUpdateMessage({ type: 'error', message: 'Failed to update student status' });
     } finally {
       setUpdatingStudent(null);
     }
@@ -201,28 +251,28 @@ export default function VolunteerPage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Username
               </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                placeholder="Enter your username"
-                required
-              />
+                             <input
+                 type="text"
+                 value={username}
+                 onChange={(e) => setUsername(e.target.value)}
+                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900 placeholder-gray-500"
+                 placeholder="Enter your username"
+                 required
+               />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Password
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                placeholder="Enter your password"
-                required
-              />
+                             <input
+                 type="password"
+                 value={password}
+                 onChange={(e) => setPassword(e.target.value)}
+                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900 placeholder-gray-500"
+                 placeholder="Enter your password"
+                 required
+               />
             </div>
 
             {error && (
@@ -252,6 +302,39 @@ export default function VolunteerPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
+        {/* Update Notification */}
+        {updateMessage && (
+          <div className={`border-b ${
+            updateMessage.type === 'success' 
+              ? 'bg-green-50 border-green-200' 
+              : 'bg-red-50 border-red-200'
+          }`}>
+            <div className="container mx-auto px-4 py-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  {updateMessage.type === 'success' ? (
+                    <CheckCircle className="w-4 h-4 text-green-600 mr-2" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-red-600 mr-2" />
+                  )}
+                  <span className={`text-sm ${
+                    updateMessage.type === 'success' ? 'text-green-800' : 'text-red-800'
+                  }`}>
+                    {updateMessage.message}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setUpdateMessage(null)}
+                  className={`${
+                    updateMessage.type === 'success' ? 'text-green-600 hover:text-green-800' : 'text-red-600 hover:text-red-800'
+                  }`}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -358,13 +441,13 @@ export default function VolunteerPage() {
               <h2 className="text-lg font-semibold text-gray-900">Student Management</h2>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="Search by IAT roll number or name..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
+                                 <input
+                   type="text"
+                   placeholder="Search by IAT roll number or name..."
+                   value={searchQuery}
+                   onChange={(e) => setSearchQuery(e.target.value)}
+                   className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900 placeholder-gray-500"
+                 />
               </div>
             </div>
           </div>

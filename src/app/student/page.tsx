@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase, getStudentProgress, TOTAL_STEPS, STEP_NAMES } from '@/lib/supabase';
-import { CheckCircle, Circle, MapPin, MessageSquare, Ticket, ArrowLeft, LogOut } from 'lucide-react';
+import { CheckCircle, Circle, MapPin, MessageSquare, Ticket, ArrowLeft, LogOut, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 
 interface Student {
@@ -53,14 +53,42 @@ export default function StudentPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [activeTab, setActiveTab] = useState<'checklist' | 'faq' | 'map' | 'messages' | 'token'>('checklist');
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchFAQs();
       fetchAnnouncements();
       fetchLocations();
+      // Set up periodic refresh of student data
+      const interval = setInterval(refreshStudentData, 5000); // Refresh every 5 seconds
+      return () => clearInterval(interval);
     }
   }, [isAuthenticated]);
+
+  // Function to refresh student data
+  const refreshStudentData = async () => {
+    if (!student) return;
+    
+    setRefreshing(true);
+    try {
+      const { data, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', student.id)
+        .single();
+
+      if (!error && data) {
+        setStudent(data);
+        setLastUpdate(new Date());
+      }
+    } catch (err) {
+      console.error('Error refreshing student data:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,13 +96,46 @@ export default function StudentPage() {
     setError('');
 
     try {
-      const { data, error } = await supabase
+      // Try multiple approaches to find the student
+      let data = null;
+      let error = null;
+
+      // First try: exact match
+      const { data: exactData, error: exactError } = await supabase
         .from('students')
         .select('*')
-        .eq('iat_roll_no', iatRollNo)
+        .eq('iat_roll_no', iatRollNo.trim())
         .single();
 
+      if (exactData) {
+        data = exactData;
+      } else {
+        // Second try: case insensitive search
+        const { data: caseData, error: caseError } = await supabase
+          .from('students')
+          .select('*')
+          .ilike('iat_roll_no', iatRollNo.trim())
+          .single();
+
+        if (caseData) {
+          data = caseData;
+        } else {
+          // Third try: without .single() to see if multiple results
+          const { data: multipleData, error: multipleError } = await supabase
+            .from('students')
+            .select('*')
+            .ilike('iat_roll_no', iatRollNo.trim());
+
+          if (multipleData && multipleData.length > 0) {
+            data = multipleData[0]; // Take the first match
+          } else {
+            error = multipleError || caseError || exactError;
+          }
+        }
+      }
+
       if (error || !data) {
+        console.error('Login error:', error);
         setError('Invalid IAT Roll Number');
         return;
       }
@@ -82,6 +143,7 @@ export default function StudentPage() {
       setStudent(data);
       setIsAuthenticated(true);
     } catch (err) {
+      console.error('Login exception:', err);
       setError('Login failed. Please try again.');
     } finally {
       setLoading(false);
@@ -172,14 +234,14 @@ export default function StudentPage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 IAT Roll Number
               </label>
-              <input
-                type="text"
-                value={iatRollNo}
-                onChange={(e) => setIatRollNo(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your IAT Roll Number"
-                required
-              />
+                             <input
+                 type="text"
+                 value={iatRollNo}
+                 onChange={(e) => setIatRollNo(e.target.value)}
+                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder-gray-500"
+                 placeholder="Enter your IAT Roll Number"
+                 required
+               />
             </div>
 
             {error && (
@@ -213,17 +275,55 @@ export default function StudentPage() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Welcome, {student?.student_name}!</h1>
               <p className="text-gray-600">IAT Roll No: {student?.iat_roll_no}</p>
+              {lastUpdate && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Last updated: {lastUpdate.toLocaleTimeString()}
+                </p>
+              )}
             </div>
-            <button
-              onClick={handleLogout}
-              className="flex items-center text-gray-600 hover:text-gray-800"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </button>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={refreshStudentData}
+                disabled={refreshing}
+                className="flex items-center text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                title="Refresh status"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex items-center text-gray-600 hover:text-gray-800"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Status Update Notification */}
+      {lastUpdate && (
+        <div className="bg-green-50 border-b border-green-200">
+          <div className="container mx-auto px-4 py-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <CheckCircle className="w-4 h-4 text-green-600 mr-2" />
+                <span className="text-sm text-green-800">
+                  Status updated at {lastUpdate.toLocaleTimeString()}
+                </span>
+              </div>
+              <button
+                onClick={() => setLastUpdate(null)}
+                className="text-green-600 hover:text-green-800"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navigation Tabs */}
       <div className="bg-white border-b">
@@ -293,6 +393,11 @@ export default function StudentPage() {
                       <h3 className="font-semibold text-gray-900">{step.name}</h3>
                       <p className="text-gray-600">{step.description}</p>
                       <p className="text-sm text-gray-500 mt-1">Location: {step.location}</p>
+                      {isStepCompleted(student!, step.id) && (
+                        <p className="text-xs text-green-600 mt-1">
+                          ✓ Completed
+                        </p>
+                      )}
                     </div>
                     {step.id === currentStep && !isStepCompleted(student!, step.id) && (
                       <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
