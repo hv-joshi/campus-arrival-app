@@ -31,6 +31,7 @@ interface Student {
   doaa_token?: number;
   verified_docs: Record<string, any>;
   flagged: boolean;
+  fees_paid: boolean;
   hostel_mess_status: boolean;
   insurance_status: boolean;
   lhc_docs_status: boolean;
@@ -66,6 +67,7 @@ export default function AdminPage() {
     student_name: '',
     doaa_token: '',
     flagged: false,
+    fees_paid: false,
     hostel_mess_status: false,
     insurance_status: false,
     lhc_docs_status: false,
@@ -82,6 +84,7 @@ export default function AdminPage() {
     student_name: '',
     doaa_token: '',
     flagged: false,
+    fees_paid: false,
     hostel_mess_status: false,
     insurance_status: false,
     lhc_docs_status: false,
@@ -404,6 +407,7 @@ export default function AdminPage() {
         student_name: '',
         doaa_token: '',
         flagged: false,
+        fees_paid: false,
         hostel_mess_status: false,
         insurance_status: false,
         lhc_docs_status: false,
@@ -422,6 +426,7 @@ export default function AdminPage() {
       student_name: student.student_name,
       doaa_token: student.doaa_token?.toString() || '',
       flagged: student.flagged,
+      fees_paid: student.fees_paid,
       hostel_mess_status: student.hostel_mess_status,
       insurance_status: student.insurance_status,
       lhc_docs_status: student.lhc_docs_status,
@@ -451,6 +456,7 @@ export default function AdminPage() {
         student_name: '',
         doaa_token: '',
         flagged: false,
+        fees_paid: false,
         hostel_mess_status: false,
         insurance_status: false,
         lhc_docs_status: false,
@@ -969,6 +975,15 @@ export default function AdminPage() {
                        <label className="flex items-center">
                          <input
                            type="checkbox"
+                           checked={editStudentData.fees_paid}
+                           onChange={(e) => setEditStudentData(prev => ({ ...prev, fees_paid: e.target.checked }))}
+                           className="mr-2"
+                         />
+                         <span className="text-sm text-gray-700">Fees Paid</span>
+                       </label>
+                       <label className="flex items-center">
+                         <input
+                           type="checkbox"
                            checked={editStudentData.hostel_mess_status}
                            onChange={(e) => setEditStudentData(prev => ({ ...prev, hostel_mess_status: e.target.checked }))}
                            className="mr-2"
@@ -1069,6 +1084,15 @@ export default function AdminPage() {
                       />
                       <span className="text-sm text-gray-700">Flagged</span>
                     </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newStudent.fees_paid}
+                        onChange={(e) => setNewStudent(prev => ({ ...prev, fees_paid: e.target.checked }))}
+                        className="mr-2"
+                      />
+                      <span className="text-sm text-gray-700">Fees Paid</span>
+                    </label>
                   </div>
                   <button
                     type="submit"
@@ -1108,6 +1132,7 @@ export default function AdminPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-wrap gap-1">
+                            {student.fees_paid && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Fees</span>}
                             {student.hostel_mess_status && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Hostel</span>}
                             {student.insurance_status && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Insurance</span>}
                             {student.lhc_docs_status && <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">LHC</span>}

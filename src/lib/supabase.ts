@@ -14,6 +14,7 @@ export interface Student {
   doaa_token?: number
   verified_docs: Record<string, any>
   flagged: boolean
+  fees_paid: boolean
   hostel_mess_status: boolean
   insurance_status: boolean
   lhc_docs_status: boolean
@@ -47,6 +48,7 @@ export interface Location {
 // Helper function to get student progress
 export function getStudentProgress(student: Student): number {
   const steps = [
+    student.fees_paid,
     student.hostel_mess_status,
     student.insurance_status,
     student.lhc_docs_status,
@@ -56,10 +58,11 @@ export function getStudentProgress(student: Student): number {
 }
 
 // Helper function to get total steps
-export const TOTAL_STEPS = 4
+export const TOTAL_STEPS = 5
 
 // Step names for UI
 export const STEP_NAMES = [
+  'Fees Payment',
   'Hostel & Mess Registration',
   'Insurance Verification',
   'LHC Documents',

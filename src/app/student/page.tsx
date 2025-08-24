@@ -13,6 +13,7 @@ interface Student {
   doaa_token?: number;
   verified_docs: Record<string, any>;
   flagged: boolean;
+  fees_paid: boolean;
   hostel_mess_status: boolean;
   insurance_status: boolean;
   lhc_docs_status: boolean;
@@ -37,10 +38,11 @@ interface Location {
 }
 
 const STEPS = [
-  { id: 1, name: "Hostel & Mess Registration", description: "Complete hostel and mess registration", location: "Hostel Office" },
-  { id: 2, name: "Insurance Verification", description: "Verify insurance documents", location: "Admin Block" },
-  { id: 3, name: "LHC Documents", description: "Submit LHC medical documents", location: "Health Center" },
-  { id: 4, name: "Final Approval", description: "Get final approval for campus entry", location: "Student Center" }
+  { id: 1, name: "Fees Payment", description: "Complete payment of all required fees", location: "SBI Collect" },
+  { id: 2, name: "Hostel & Mess Registration", description: "Complete hostel and mess registration", location: "Hostel 8" },
+  { id: 3, name: "Insurance Verification", description: "Verify insurance documents", location: "SBI Bank" },
+  { id: 4, name: "LHC Documents", description: "Submit verified documents", location: "LHC Lecture Hall 5" },
+  { id: 5, name: "Finished", description: "Welcome to IISERB", location: "Leaving L5" }
 ];
 
 export default function StudentPage() {
@@ -209,19 +211,21 @@ export default function StudentPage() {
   };
 
   const getCurrentStep = (student: Student): number => {
-    if (student.final_approval_status) return 4;
-    if (student.lhc_docs_status) return 3;
-    if (student.insurance_status) return 2;
-    if (student.hostel_mess_status) return 1;
+    if (student.final_approval_status) return 5;
+    if (student.lhc_docs_status) return 4;
+    if (student.insurance_status) return 3;
+    if (student.hostel_mess_status) return 2;
+    if (student.fees_paid) return 1;
     return 0;
   };
 
   const isStepCompleted = (student: Student, stepId: number): boolean => {
     switch (stepId) {
-      case 1: return student.hostel_mess_status;
-      case 2: return student.insurance_status;
-      case 3: return student.lhc_docs_status;
-      case 4: return student.final_approval_status;
+      case 1: return student.fees_paid;
+      case 2: return student.hostel_mess_status;
+      case 3: return student.insurance_status;
+      case 4: return student.lhc_docs_status;
+      case 5: return student.final_approval_status;
       default: return false;
     }
   };

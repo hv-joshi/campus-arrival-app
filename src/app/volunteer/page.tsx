@@ -20,6 +20,7 @@ interface Student {
   doaa_token?: number;
   verified_docs: Record<string, any>;
   flagged: boolean;
+  fees_paid: boolean;
   hostel_mess_status: boolean;
   insurance_status: boolean;
   lhc_docs_status: boolean;
@@ -33,10 +34,11 @@ interface StepStats {
 }
 
 const STEPS = [
-  { id: 1, name: "Hostel & Mess Registration" },
-  { id: 2, name: "Insurance Verification" },
-  { id: 3, name: "LHC Documents" },
-  { id: 4, name: "Final Approval" }
+  { id: 1, name: "Fees Payment" },
+  { id: 2, name: "Hostel & Mess Registration" },
+  { id: 3, name: "Insurance Verification" },
+  { id: 4, name: "LHC Documents" },
+  { id: 5, name: "Final Approval" }
 ];
 
 export default function VolunteerPage() {
@@ -159,15 +161,18 @@ export default function VolunteerPage() {
       let count = 0;
       switch (step.id) {
         case 1:
-          count = studentData.filter(student => student.hostel_mess_status).length;
+          count = studentData.filter(student => student.fees_paid).length;
           break;
         case 2:
-          count = studentData.filter(student => student.insurance_status).length;
+          count = studentData.filter(student => student.hostel_mess_status).length;
           break;
         case 3:
-          count = studentData.filter(student => student.lhc_docs_status).length;
+          count = studentData.filter(student => student.insurance_status).length;
           break;
         case 4:
+          count = studentData.filter(student => student.lhc_docs_status).length;
+          break;
+        case 5:
           count = studentData.filter(student => student.final_approval_status).length;
           break;
       }
@@ -537,6 +542,9 @@ export default function VolunteerPage() {
                     Token
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Fees Payment
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Hostel & Mess
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -605,6 +613,19 @@ export default function VolunteerPage() {
                            </div>
                         )}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <button
+                        onClick={() => updateStudentStep(student.id, 'fees_paid', !student.fees_paid)}
+                        disabled={updatingStudent === student.id}
+                        className={`px-2 py-1 rounded text-xs font-medium ${
+                          student.fees_paid
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {updatingStudent === student.id ? 'Updating...' : (student.fees_paid ? '✓' : 'Pending')}
+                      </button>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button
