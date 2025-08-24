@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase, getStudentProgress, TOTAL_STEPS, STEP_NAMES } from '@/lib/supabase';
-import { ArrowLeft, LogOut, Search, Users, CheckCircle, Clock, AlertCircle, BarChart3, RefreshCw } from 'lucide-react';
+import { ArrowLeft, LogOut, Search, Users, CheckCircle, Clock, AlertCircle, BarChart3, RefreshCw, Ticket } from 'lucide-react';
 import Link from 'next/link';
 
 interface Volunteer {
@@ -54,6 +54,7 @@ export default function VolunteerPage() {
   const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
   const [updatingStudent, setUpdatingStudent] = useState<number | null>(null);
   const [updateMessage, setUpdateMessage] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [tokenInputs, setTokenInputs] = useState<Record<number, string>>({});
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -221,6 +222,58 @@ export default function VolunteerPage() {
     }
   };
 
+  const updateStudentToken = async (studentId: number, token: number | undefined) => {
+    try {
+      const { error } = await supabase
+        .from('students')
+        .update({ doaa_token: token === undefined ? null : token })
+        .eq('id', studentId);
+
+      if (error) {
+        console.error('Error updating student token:', error);
+        setUpdateMessage({ type: 'error', message: 'Failed to update student token' });
+        return;
+      }
+
+      // Update local state
+      setStudents(prev => prev.map(student => 
+        student.id === studentId 
+          ? { ...student, doaa_token: token }
+          : student
+      ));
+
+      // Clear token input for this student
+      setTokenInputs(prev => ({ ...prev, [studentId]: '' }));
+
+      // Show success message
+      const student = students.find(s => s.id === studentId);
+      setUpdateMessage({ 
+        type: 'success', 
+        message: `Updated ${student?.student_name}'s DOAA token to ${token ? `#${token}` : 'Not assigned'}` 
+      });
+
+      // Clear message after 3 seconds
+      setTimeout(() => setUpdateMessage(null), 3000);
+    } catch (err) {
+      console.error('Error updating student token:', err);
+      setUpdateMessage({ type: 'error', message: 'Failed to update student token' });
+    }
+  };
+
+  const handleTokenInputChange = (studentId: number, value: string) => {
+    setTokenInputs(prev => ({ ...prev, [studentId]: value }));
+  };
+
+  const handleAssignToken = (studentId: number) => {
+    const tokenValue = tokenInputs[studentId];
+    if (tokenValue && tokenValue.trim() !== '') {
+      const token = parseInt(tokenValue);
+      if (!isNaN(token) && token > 0) {
+        updateStudentToken(studentId, token);
+      }
+    }
+  };
+
   const handleLogout = () => {
     setIsAuthenticated(false);
     setVolunteer(null);
@@ -230,6 +283,7 @@ export default function VolunteerPage() {
     setStudents([]);
     setFilteredStudents([]);
     setStepStats([]);
+    setTokenInputs({});
   };
 
   if (!isAuthenticated) {
@@ -297,6 +351,13 @@ export default function VolunteerPage() {
   const totalStudents = students.length;
   const completedStudents = students.filter(s => s.final_approval_status).length;
   const inProgressStudents = totalStudents - completedStudents;
+  
+  // Calculate highest token assigned
+  const assignedTokens = students
+    .filter(s => s.doaa_token && s.doaa_token > 0)
+    .map(s => s.doaa_token!)
+    .sort((a, b) => b - a);
+  const highestToken = assignedTokens.length > 0 ? assignedTokens[0] : 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -362,58 +423,72 @@ export default function VolunteerPage() {
       </div>
 
       <div className="container mx-auto px-4 py-8">
-        {/* Dashboard Stats */}
-        <div className="grid md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <div className="bg-blue-100 p-3 rounded-full">
-                <Users className="w-6 h-6 text-blue-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Students</p>
-                <p className="text-2xl font-bold text-gray-900">{totalStudents}</p>
-              </div>
-            </div>
-          </div>
+                 {/* Dashboard Stats */}
+         <div className="grid md:grid-cols-5 gap-6 mb-8">
+           <div className="bg-white rounded-lg shadow p-6">
+             <div className="flex items-center">
+               <div className="bg-blue-100 p-3 rounded-full">
+                 <Users className="w-6 h-6 text-blue-600" />
+               </div>
+               <div className="ml-4">
+                 <p className="text-sm font-medium text-gray-600">Total Students</p>
+                 <p className="text-2xl font-bold text-gray-900">{totalStudents}</p>
+               </div>
+             </div>
+           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <div className="bg-yellow-100 p-3 rounded-full">
-                <Clock className="w-6 h-6 text-yellow-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">In Progress</p>
-                <p className="text-2xl font-bold text-gray-900">{inProgressStudents}</p>
-              </div>
-            </div>
-          </div>
+           <div className="bg-white rounded-lg shadow p-6">
+             <div className="flex items-center">
+               <div className="bg-yellow-100 p-3 rounded-full">
+                 <Clock className="w-6 h-6 text-yellow-600" />
+               </div>
+               <div className="ml-4">
+                 <p className="text-sm font-medium text-gray-600">In Progress</p>
+                 <p className="text-2xl font-bold text-gray-900">{inProgressStudents}</p>
+               </div>
+             </div>
+           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <div className="bg-green-100 p-3 rounded-full">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Completed</p>
-                <p className="text-2xl font-bold text-gray-900">{completedStudents}</p>
-              </div>
-            </div>
-          </div>
+           <div className="bg-white rounded-lg shadow p-6">
+             <div className="flex items-center">
+               <div className="bg-green-100 p-3 rounded-full">
+                 <CheckCircle className="w-6 h-6 text-green-600" />
+               </div>
+               <div className="ml-4">
+                 <p className="text-sm font-medium text-gray-600">Completed</p>
+                 <p className="text-2xl font-bold text-gray-900">{completedStudents}</p>
+               </div>
+             </div>
+           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <div className="bg-purple-100 p-3 rounded-full">
-                <BarChart3 className="w-6 h-6 text-purple-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Completion Rate</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {totalStudents > 0 ? Math.round((completedStudents / totalStudents) * 100) : 0}%
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+           <div className="bg-white rounded-lg shadow p-6">
+             <div className="flex items-center">
+               <div className="bg-purple-100 p-3 rounded-full">
+                 <BarChart3 className="w-6 h-6 text-purple-600" />
+               </div>
+               <div className="ml-4">
+                 <p className="text-sm font-medium text-gray-600">Completion Rate</p>
+                 <p className="text-2xl font-bold text-gray-900">
+                   {totalStudents > 0 ? Math.round((completedStudents / totalStudents) * 100) : 0}%
+                 </p>
+               </div>
+             </div>
+           </div>
+
+           <div className="bg-white rounded-lg shadow p-6">
+             <div className="flex items-center">
+               <div className="bg-orange-100 p-3 rounded-full">
+                 <Ticket className="w-6 h-6 text-orange-600" />
+               </div>
+               <div className="ml-4">
+                 <p className="text-sm font-medium text-gray-600">Highest Token</p>
+                 <p className="text-2xl font-bold text-gray-900">
+                   {highestToken > 0 ? `#${highestToken}` : 'None'}
+                 </p>
+               </div>
+             </div>
+           </div>
+         </div>
 
         {/* Step Statistics */}
         <div className="bg-white rounded-lg shadow mb-8">
@@ -488,7 +563,48 @@ export default function VolunteerPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {student.doaa_token || 'Not assigned'}
+                      <div className="flex items-center space-x-2">
+                        {student.doaa_token ? (
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm font-medium text-gray-900">#{student.doaa_token}</span>
+                            <button
+                              onClick={() => updateStudentToken(student.id, undefined)}
+                              disabled={updatingStudent === student.id}
+                              className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {updatingStudent === student.id ? 'Removing...' : 'Remove'}
+                            </button>
+                          </div>
+                        ) : (
+                                                     <div className="flex items-center space-x-2">
+                             <div className="flex flex-col space-y-1">
+                               <input
+                                 type="number"
+                                 placeholder="Token #"
+                                 value={tokenInputs[student.id] || ''}
+                                 onChange={(e) => handleTokenInputChange(student.id, e.target.value)}
+                                 disabled={updatingStudent === student.id}
+                                 className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                 onKeyPress={(e) => {
+                                   if (e.key === 'Enter') {
+                                     handleAssignToken(student.id);
+                                   }
+                                 }}
+                               />
+                               <span className="text-xs text-gray-500">
+                                 Next: #{highestToken + 1}
+                               </span>
+                             </div>
+                             <button
+                               onClick={() => handleAssignToken(student.id)}
+                               disabled={updatingStudent === student.id}
+                               className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                             >
+                               {updatingStudent === student.id ? 'Assigning...' : 'Assign'}
+                             </button>
+                           </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button
