@@ -72,31 +72,12 @@ A comprehensive web application for managing new student arrivals on campus. The
 
 1. **Hostel & Mess Registration**: Complete hostel and mess registration
 2. **Insurance Verification**: Verify insurance documents
-3. **LHC Documents**: Submit LHC medical documents
+3. **LHC Documents**: Submit LHC documents
 4. **Final Approval**: Get final approval for campus entry
 
 ## Security Notes
 
 ⚠️ **Important**: This is a demo application with simplified authentication.
-
-## Customization
-
-### Adding New Steps
-1. Update the `STEPS` array in each page component
-2. Modify the database constraints if needed
-3. Update the UI components accordingly
-
-### Styling
-The app uses Tailwind CSS. You can customize the design by:
-1. Modifying the color schemes in the components
-2. Updating the Tailwind configuration
-3. Adding custom CSS classes
-
-### Database
-To add new features:
-1. Create new tables in Supabase
-2. Update the TypeScript interfaces in `src/lib/supabase.ts`
-3. Add corresponding API calls in the components
 
 ## Contributing
 
