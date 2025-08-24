@@ -47,7 +47,7 @@ A comprehensive web application for managing new student arrivals on campus. The
 - `insurance_status`: Insurance verification status
 - `lhc_docs_status`: LHC documents status
 - `final_approval_status`: Final approval status
-
+- 'fees_paid': Fees Paid before arrival to campus
 ### Volunteers Table
 - `id`: Unique identifier (BIGSERIAL)
 - `username`: Login username (unique)
