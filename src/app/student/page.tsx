@@ -41,8 +41,9 @@ const STEPS = [
   { id: 1, name: "Fees Payment", description: "Complete payment of all required fees", location: "SBI Collect" },
   { id: 2, name: "Hostel & Mess Registration", description: "Complete hostel and mess registration", location: "Hostel 8" },
   { id: 3, name: "Insurance Verification", description: "Verify insurance documents", location: "SBI Bank" },
-  { id: 4, name: "LHC Documents", description: "Submit verified documents", location: "LHC Lecture Hall 5" },
-  { id: 5, name: "Finished", description: "Welcome to IISERB", location: "Leaving L5" }
+  { id: 4, name: "Token Assignment", description: "Token assignment for Document verification", location: "LHC"},
+  { id: 5, name: "LHC Documents", description: "Submit verified documents", location: "LHC Lecture Hall 5" },
+  { id: 6, name: "Finished", description: "Welcome to IISERB", location: "Leaving L5" }
 ];
 
 export default function StudentPage() {
