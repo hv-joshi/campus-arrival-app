@@ -10,6 +10,8 @@ interface Volunteer {
   username: string;
   password: string;
   role: string;
+  can_verify_lhc: boolean;
+  is_available: boolean;
 }
 
 interface FAQ {
@@ -28,8 +30,6 @@ interface Student {
   created_at: string;
   iat_roll_no: string;
   student_name: string;
-  doaa_token?: number;
-  verified_docs: Record<string, any>;
   flagged: boolean;
   fees_paid: boolean;
   hostel_mess_status: boolean;
@@ -59,19 +59,23 @@ export default function AdminPage() {
   const [locations, setLocations] = useState<Location[]>([]);
   
   // Form states
-  const [newVolunteer, setNewVolunteer] = useState({ username: '', password: '', role: 'volunteer' });
+  const [newVolunteer, setNewVolunteer] = useState({ 
+    username: '', 
+    password: '', 
+    role: 'General Volunteer',
+    can_verify_lhc: false 
+  });
   const [newAnnouncement, setNewAnnouncement] = useState('');
   const [newFAQ, setNewFAQ] = useState({ question: '', answer: '' });
   const [newStudent, setNewStudent] = useState({
     iat_roll_no: '',
     student_name: '',
-    doaa_token: '',
     flagged: false,
     fees_paid: false,
     hostel_mess_status: false,
     insurance_status: false,
     lhc_docs_status: false,
-    final_approval_status: false
+    final_approval_status: false,
   });
   const [newLocation, setNewLocation] = useState({ name: '', map_link: '' });
   
@@ -112,48 +116,63 @@ export default function AdminPage() {
       let data = null;
       let error = null;
 
-      // First try: exact match
-      const { data: exactData, error: exactError } = await supabase
-        .from('volunteers')
-        .select('*')
-        .eq('username', username.trim())
-        .eq('password', password)
-        .eq('role', 'admin')
-        .single();
-
-      if (exactData) {
-        data = exactData;
-      } else {
-        // Second try: case insensitive username search
-        const { data: caseData, error: caseError } = await supabase
-          .from('volunteers')
-          .select('*')
-          .ilike('username', username.trim())
-          .eq('password', password)
-          .eq('role', 'admin')
-          .single();
-
-        if (caseData) {
-          data = caseData;
-        } else {
-          // Third try: without .single() to see if multiple results
-          const { data: multipleData, error: multipleError } = await supabase
+             // Try different role variations
+       const roleVariations = ['admin', 'Admin', 'ADMIN', 'Administrator', 'administrator'];
+      
+      for (const role of roleVariations) {
+        try {
+          const { data: roleData, error: roleError } = await supabase
             .from('volunteers')
             .select('*')
-            .ilike('username', username.trim())
+            .eq('username', username.trim())
             .eq('password', password)
-            .eq('role', 'admin');
+            .eq('role', role)
+            .single();
 
-          if (multipleData && multipleData.length > 0) {
-            data = multipleData[0]; // Take the first match
-          } else {
-            error = multipleError || caseError || exactError;
+          if (roleData) {
+            data = roleData;
+            break;
           }
+        } catch (err) {
+          // Continue to next role variation
         }
       }
 
-      if (error || !data) {
-        console.error('Admin login error:', error);
+      // If no match found with role, try without role constraint
+      if (!data) {
+        try {
+          const { data: noRoleData, error: noRoleError } = await supabase
+            .from('volunteers')
+            .select('*')
+            .eq('username', username.trim())
+            .eq('password', password)
+            .single();
+
+          if (noRoleData) {
+            // Check if this user has admin-like permissions
+            if (noRoleData.can_verify_lhc || noRoleData.role?.toLowerCase().includes('admin')) {
+              data = noRoleData;
+            }
+          }
+        } catch (err) {
+          // Continue to error handling
+        }
+      }
+
+      if (!data) {
+        // Debug: Let's see what admin accounts exist
+        try {
+          const { data: debugData } = await supabase
+            .from('volunteers')
+            .select('username, role, can_verify_lhc')
+            .or('role.ilike.%admin%,can_verify_lhc.eq.true');
+          
+          console.log('Debug: Available admin-like accounts:', debugData);
+        } catch (debugErr) {
+          console.log('Debug query failed:', debugErr);
+        }
+        
+        console.error('Admin login error: No matching admin found');
         setError('Invalid admin credentials');
         return;
       }
@@ -252,12 +271,19 @@ export default function AdminPage() {
         .insert([{
           username: newVolunteer.username,
           password: newVolunteer.password,
-          role: newVolunteer.role
+          role: newVolunteer.role,
+          can_verify_lhc: newVolunteer.can_verify_lhc,
+          is_available: true
         }]);
 
       if (error) throw error;
 
-      setNewVolunteer({ username: '', password: '', role: 'volunteer' });
+      setNewVolunteer({ 
+        username: '', 
+        password: '', 
+        role: 'General Volunteer',
+        can_verify_lhc: false 
+      });
       fetchVolunteers();
     } catch (err) {
       console.error('Error adding volunteer:', err);
@@ -392,20 +418,18 @@ export default function AdminPage() {
 
     try {
       const studentData = {
-        ...newStudent,
-        doaa_token: newStudent.doaa_token ? parseInt(newStudent.doaa_token) : null
+        ...newStudent
       };
-
-      const { error } = await supabase
+      console.log('Adding student with data:', studentData);
+      const { data, error } = await supabase
         .from('students')
         .insert([studentData]);
-
+      console.log('Add response:', { data, error });
       if (error) throw error;
 
       setNewStudent({
         iat_roll_no: '',
         student_name: '',
-        doaa_token: '',
         flagged: false,
         fees_paid: false,
         hostel_mess_status: false,
@@ -472,11 +496,12 @@ export default function AdminPage() {
     if (!confirm('Are you sure you want to delete this student?')) return;
 
     try {
-      const { error } = await supabase
+      console.log('Deleting student with id:', id);
+      const { data, error } = await supabase
         .from('students')
         .delete()
         .eq('id', id);
-
+      console.log('Delete response:', { data, error });
       if (error) throw error;
       fetchStudents();
     } catch (err) {
@@ -675,36 +700,53 @@ export default function AdminPage() {
                 <h2 className="text-lg font-semibold text-gray-900">Add New Volunteer</h2>
               </div>
               <div className="p-6">
-                <form onSubmit={addVolunteer} className="grid md:grid-cols-4 gap-4">
-                  <input
-                    type="text"
-                    placeholder="Username"
-                    value={newVolunteer.username}
-                    onChange={(e) => setNewVolunteer(prev => ({ ...prev, username: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
-                    required
-                  />
-                  <input
-                    type="password"
-                    placeholder="Password"
-                    value={newVolunteer.password}
-                    onChange={(e) => setNewVolunteer(prev => ({ ...prev, password: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
-                    required
-                  />
-                  <select
-                    value={newVolunteer.role}
-                    onChange={(e) => setNewVolunteer(prev => ({ ...prev, role: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
-                  >
-                    <option value="volunteer">Volunteer</option>
-                    <option value="admin">Admin</option>
-                  </select>
+                <form onSubmit={addVolunteer} className="space-y-4">
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <input
+                      type="text"
+                      placeholder="Username"
+                      value={newVolunteer.username}
+                      onChange={(e) => setNewVolunteer(prev => ({ ...prev, username: e.target.value }))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
+                      required
+                    />
+                    <input
+                      type="password"
+                      placeholder="Password"
+                      value={newVolunteer.password}
+                      onChange={(e) => setNewVolunteer(prev => ({ ...prev, password: e.target.value }))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
+                      required
+                    />
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <select
+                      value={newVolunteer.role}
+                      onChange={(e) => setNewVolunteer(prev => ({ ...prev, role: e.target.value }))}
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
+                    >
+                                             <option value="General Volunteer">General Volunteer</option>
+                       <option value="LHC Verifier">LHC Verifier</option>
+                       <option value="admin">Admin</option>
+                    </select>
+                    <div className="flex items-center">
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={newVolunteer.can_verify_lhc}
+                          onChange={(e) => setNewVolunteer(prev => ({ ...prev, can_verify_lhc: e.target.checked }))}
+                          className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 mr-2"
+                        />
+                        <span className="text-sm text-gray-700">Can verify LHC documents</span>
+                      </label>
+                    </div>
+                  </div>
                   <button
                     type="submit"
                     className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Volunteer
                   </button>
                 </form>
               </div>
@@ -720,6 +762,8 @@ export default function AdminPage() {
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Username</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">LHC Verifier</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
                   </thead>
@@ -730,12 +774,30 @@ export default function AdminPage() {
                           {volunteer.username}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            volunteer.role === 'admin' 
-                              ? 'bg-purple-100 text-purple-800' 
-                              : 'bg-green-100 text-green-800'
-                          }`}>
+                                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                             volunteer.role === 'admin' || volunteer.role === 'Admin'
+                               ? 'bg-purple-100 text-purple-800' 
+                               : volunteer.role === 'LHC Verifier'
+                               ? 'bg-blue-100 text-blue-800'
+                               : 'bg-green-100 text-green-800'
+                           }`}>
                             {volunteer.role}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {volunteer.can_verify_lhc ? (
+                            <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Yes</span>
+                          ) : (
+                            <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs">No</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            volunteer.is_available
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {volunteer.is_available ? 'Available' : 'Unavailable'}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -1067,13 +1129,7 @@ export default function AdminPage() {
                     className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
                     required
                   />
-                  <input
-                    type="number"
-                    placeholder="DOAA Token (optional)"
-                    value={newStudent.doaa_token}
-                    onChange={(e) => setNewStudent(prev => ({ ...prev, doaa_token: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 placeholder-gray-500"
-                  />
+
                   <div className="flex items-center space-x-4">
                     <label className="flex items-center">
                       <input
@@ -1128,7 +1184,7 @@ export default function AdminPage() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {student.doaa_token ? `#${student.doaa_token}` : 'Not assigned'}
+                          Not assigned
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-wrap gap-1">

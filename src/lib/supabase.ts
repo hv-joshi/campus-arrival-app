@@ -11,8 +11,7 @@ export interface Student {
   created_at: string
   iat_roll_no: string
   student_name: string
-  doaa_token?: number
-  verified_docs: Record<string, any>
+  token_assigned?: boolean
   flagged: boolean
   fees_paid: boolean
   hostel_mess_status: boolean
@@ -26,6 +25,17 @@ export interface Volunteer {
   username: string
   password: string
   role: string
+  can_verify_lhc: boolean
+  is_available: boolean
+}
+
+export interface ApprovalToken {
+  id: number
+  token_number: number
+  student_roll_no: string
+  created_at: string
+  volunteer_id?: number
+  is_processing?: boolean
 }
 
 export interface Announcement {
@@ -51,6 +61,7 @@ export function getStudentProgress(student: Student): number {
     student.fees_paid,
     student.hostel_mess_status,
     student.insurance_status,
+    student.token_assigned,
     student.lhc_docs_status,
     student.final_approval_status
   ]
@@ -58,13 +69,14 @@ export function getStudentProgress(student: Student): number {
 }
 
 // Helper function to get total steps
-export const TOTAL_STEPS = 5
+export const TOTAL_STEPS = 6
 
 // Step names for UI
 export const STEP_NAMES = [
   'Fees Payment',
   'Hostel & Mess Registration',
   'Insurance Verification',
+  'Token Assignment',
   'LHC Documents',
   'Final Approval'
 ]

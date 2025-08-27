@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase, getStudentProgress, TOTAL_STEPS, STEP_NAMES } from '@/lib/supabase';
-import { CheckCircle, Circle, MapPin, MessageSquare, Ticket, ArrowLeft, LogOut, RefreshCw } from 'lucide-react';
+import { CheckCircle, Circle, MapPin, MessageSquare, Ticket, ArrowLeft, LogOut, RefreshCw, Bell } from 'lucide-react';
 import Link from 'next/link';
 
 interface Student {
@@ -10,8 +10,7 @@ interface Student {
   created_at: string;
   iat_roll_no: string;
   student_name: string;
-  doaa_token?: number;
-  verified_docs: Record<string, any>;
+  token_assigned: boolean;
   flagged: boolean;
   fees_paid: boolean;
   hostel_mess_status: boolean;
@@ -37,13 +36,19 @@ interface Location {
   map_link: string;
 }
 
+interface ApprovalToken {
+  id: number;
+  token_number: number;
+  student_roll_no: string;
+  created_at: string;
+}
+
 const STEPS = [
   { id: 1, name: "Fees Payment", description: "Complete payment of all required fees", location: "SBI Collect" },
   { id: 2, name: "Hostel & Mess Registration", description: "Complete hostel and mess registration", location: "Hostel 8" },
   { id: 3, name: "Insurance Verification", description: "Verify insurance documents", location: "SBI Bank" },
-  { id: 4, name: "Token Assignment", description: "Token assignment for Document verification", location: "LHC"},
-  { id: 5, name: "LHC Documents", description: "Submit verified documents", location: "LHC Lecture Hall 5" },
-  { id: 6, name: "Finished", description: "Welcome to IISERB", location: "Leaving L5" }
+  { id: 4, name: "LHC Documents", description: "Submit verified documents", location: "LHC Lecture Hall 5" },
+  { id: 5, name: "Finished", description: "Welcome to IISERB", location: "Leaving L5" }
 ];
 
 export default function StudentPage() {
@@ -59,12 +64,14 @@ export default function StudentPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshingAnnouncements, setRefreshingAnnouncements] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [approvalToken, setApprovalToken] = useState<ApprovalToken | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchFAQs();
       fetchAnnouncements();
       fetchLocations();
+      fetchApprovalToken();
              // Set up periodic refresh of student data and announcements
        const studentInterval = setInterval(refreshStudentData, 20000); // Refresh every 20 seconds
        const announcementInterval = setInterval(fetchAnnouncements, 20000); // Refresh announcements every 20 seconds
@@ -81,20 +88,62 @@ export default function StudentPage() {
     
     setRefreshing(true);
     try {
-      const { data, error } = await supabase
-        .from('students')
-        .select('*')
-        .eq('id', student.id)
-        .single();
+      // Fetch both student and token data in parallel
+      const [studentData, tokenData] = await Promise.all([
+        supabase
+          .from('students')
+          .select('*')
+          .eq('id', student.id)
+          .single(),
+        supabase
+          .from('approval_tokens')
+          .select('*')
+          .eq('student_roll_no', student.iat_roll_no)
+          .single()
+      ]);
 
-      if (!error && data) {
-        setStudent(data);
-        setLastUpdate(new Date());
+      if (!studentData.error && studentData.data) {
+        setStudent(studentData.data);
       }
+
+      if (!tokenData.error && tokenData.data) {
+        setApprovalToken(tokenData.data);
+        // If token exists but token_assigned is false, update it
+        if (studentData.data && !studentData.data.token_assigned) {
+          const { error: updateError } = await supabase
+            .from('students')
+            .update({ token_assigned: true })
+            .eq('id', studentData.data.id);
+          
+          if (!updateError) {
+            setStudent(prev => prev ? { ...prev, token_assigned: true } : prev);
+          }
+        }
+      }
+      
+      setLastUpdate(new Date());
     } catch (err) {
       console.error('Error refreshing student data:', err);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const fetchApprovalToken = async () => {
+    if (!student) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('approval_tokens')
+        .select('*')
+        .eq('student_roll_no', student.iat_roll_no)
+        .single();
+
+      if (!error && data) {
+        setApprovalToken(data);
+      }
+    } catch (err) {
+      console.error('Error fetching approval token:', err);
     }
   };
 
@@ -150,6 +199,25 @@ export default function StudentPage() {
 
       setStudent(data);
       setIsAuthenticated(true);
+      
+      // Check for approval token and update token_assigned if needed
+      const { data: tokenData } = await supabase
+        .from('approval_tokens')
+        .select('*')
+        .eq('student_roll_no', data.iat_roll_no)
+        .single();
+      
+      if (tokenData) {
+        // If we find a token, ensure token_assigned is true
+        await supabase
+          .from('students')
+          .update({ token_assigned: true })
+          .eq('iat_roll_no', data.iat_roll_no);
+          
+        setApprovalToken(tokenData);
+        // Update local student data with token_assigned true
+        setStudent(prev => prev ? { ...prev, token_assigned: true } : prev);
+      }
     } catch (err) {
       console.error('Login exception:', err);
       setError('Login failed. Please try again.');
@@ -284,40 +352,65 @@ export default function StudentPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-             {/* Header */}
-       <div className="bg-white shadow-sm border-b">
-         <div className="container mx-auto px-4 py-3 md:py-4">
-           <div className="flex flex-col md:flex-row md:items-center justify-between space-y-3 md:space-y-0">
-             <div>
-               <h1 className="text-xl md:text-2xl font-bold text-gray-900">Welcome, {student?.student_name}!</h1>
-               <p className="text-sm md:text-base text-gray-600">IAT Roll No: {student?.iat_roll_no}</p>
-               {lastUpdate && (
-                 <p className="text-xs text-gray-500 mt-1">
-                   Last updated: {lastUpdate.toLocaleTimeString()}
-                 </p>
-               )}
-             </div>
-             <div className="flex items-center space-x-3 md:space-x-4">
-               <button
-                 onClick={refreshStudentData}
-                 disabled={refreshing}
-                 className="flex items-center text-blue-600 hover:text-blue-800 disabled:opacity-50 text-sm"
-                 title="Refresh status"
-               >
-                 <RefreshCw className={`w-4 h-4 mr-1 md:mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                 <span className="hidden sm:inline">{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-               </button>
-               <button
-                 onClick={handleLogout}
-                 className="flex items-center text-gray-600 hover:text-gray-800 text-sm"
-               >
-                 <LogOut className="w-4 h-4 mr-1 md:mr-2" />
-                 <span className="hidden sm:inline">Logout</span>
-               </button>
-             </div>
-           </div>
-         </div>
-       </div>
+      {/* Announcements Section - Always Visible */}
+      {announcements.length > 0 && (
+        <div className="bg-blue-50 border-b border-blue-200">
+          <div className="container mx-auto px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <Bell className="w-5 h-5 text-blue-600 mr-3" />
+                <div>
+                  <h3 className="text-sm font-semibold text-blue-900 mb-1">Latest Announcement</h3>
+                  <p className="text-sm text-blue-800">{announcements[0].message}</p>
+                </div>
+              </div>
+              <button
+                onClick={fetchAnnouncements}
+                disabled={refreshingAnnouncements}
+                className="flex items-center text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                title="Refresh announcements"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshingAnnouncements ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="container mx-auto px-4 py-3 md:py-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between space-y-3 md:space-y-0">
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-gray-900">Welcome, {student?.student_name}!</h1>
+              <p className="text-sm md:text-base text-gray-600">IAT Roll No: {student?.iat_roll_no}</p>
+              {lastUpdate && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Last updated: {lastUpdate.toLocaleTimeString()}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center space-x-3 md:space-x-4">
+              <button
+                onClick={refreshStudentData}
+                disabled={refreshing}
+                className="flex items-center text-blue-600 hover:text-blue-800 disabled:opacity-50 text-sm"
+                title="Refresh status"
+              >
+                <RefreshCw className={`w-4 h-4 mr-1 md:mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex items-center text-gray-600 hover:text-gray-800 text-sm"
+              >
+                <LogOut className="w-4 h-4 mr-1 md:mr-2" />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Status Update Notification */}
       {lastUpdate && (
@@ -515,13 +608,13 @@ export default function StudentPage() {
            <div className="max-w-4xl mx-auto">
              <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4 md:mb-6">Your Token</h2>
              <div className="bg-white rounded-lg shadow p-4 md:p-6">
-               {student?.doaa_token ? (
+               {approvalToken ? (
                  <div className="text-center">
                    <div className="bg-blue-50 rounded-lg p-4 md:p-8 border-2 border-blue-200">
                      <Ticket className="w-8 h-8 md:w-12 md:h-12 text-blue-600 mx-auto mb-3 md:mb-4" />
                      <h3 className="text-lg md:text-xl font-bold text-gray-900 mb-2">Your DOAA Token</h3>
                      <p className="text-2xl md:text-3xl font-mono text-blue-600 bg-blue-100 px-3 md:px-4 py-2 rounded">
-                       {student.doaa_token}
+                       {approvalToken.token_number}
                      </p>
                      <p className="text-sm md:text-base text-gray-600 mt-3 md:mt-4">
                        Show this token to volunteers at each step
