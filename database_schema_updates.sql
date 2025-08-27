@@ -75,6 +75,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- 11. Settings table to store admin-configurable values
+CREATE TABLE IF NOT EXISTS public.settings (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    skip_offset INTEGER NOT NULL DEFAULT 3,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Ensure single-row semantics
+INSERT INTO public.settings (id, skip_offset)
+SELECT 1, 3
+WHERE NOT EXISTS (SELECT 1 FROM public.settings WHERE id = 1);
+
 -- 8. Create trigger to ensure unique token numbers
 CREATE OR REPLACE FUNCTION ensure_unique_token_number()
 RETURNS TRIGGER AS $$

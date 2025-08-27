@@ -98,11 +98,42 @@ export default function AdminPage() {
   const [editLocationData, setEditLocationData] = useState({ name: '', map_link: '' });
   
   // Active tab
-  const [activeTab, setActiveTab] = useState<'volunteers' | 'announcements' | 'faqs' | 'students' | 'locations'>('volunteers');
+  const [activeTab, setActiveTab] = useState<'volunteers' | 'announcements' | 'faqs' | 'students' | 'locations' | 'settings'>('volunteers');
+  const [skipOffset, setSkipOffset] = useState<number>(3);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchData();
+
+      // Polling refresh every 3 seconds
+      const interval = setInterval(() => {
+        fetchData();
+      }, 3000);
+
+      // Refresh on focus/visibility
+      const onFocus = () => fetchData();
+      const onVisibility = () => {
+        if (document.visibilityState === 'visible') fetchData();
+      };
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onVisibility);
+
+      // Realtime subscriptions for admin dashboard
+      const channel = (supabase as any)
+        .channel('admin_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'volunteers' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'faqs' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'locations' }, () => fetchData())
+        .subscribe();
+
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVisibility);
+        try { (supabase as any).removeChannel(channel); } catch {}
+      };
     }
   }, [isAuthenticated]);
 
@@ -192,8 +223,37 @@ export default function AdminPage() {
       fetchFAQs(),
       fetchAnnouncements(),
       fetchStudents(),
-      fetchLocations()
+      fetchLocations(),
+      fetchSettings()
     ]);
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const { data } = await supabase
+        .from('settings')
+        .select('skip_offset')
+        .limit(1)
+        .single();
+      if (data && typeof (data as any).skip_offset === 'number') {
+        setSkipOffset((data as any).skip_offset);
+      }
+    } catch (err) {
+      // Settings table may not exist yet; keep default
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      // Upsert single row settings
+      const { error } = await supabase
+        .from('settings')
+        .upsert({ id: 1, skip_offset: skipOffset }, { onConflict: 'id' });
+      if (error) throw error;
+      alert('Settings saved');
+    } catch (err) {
+      alert('Failed to save settings');
+    }
   };
 
   const fetchVolunteers = async () => {
@@ -667,12 +727,13 @@ export default function AdminPage() {
       <div className="bg-white border-b">
         <div className="container mx-auto px-4">
           <nav className="flex space-x-8">
-            {[
+            {[ 
               { id: 'volunteers', label: 'Volunteers', icon: Users },
               { id: 'announcements', label: 'Announcement', icon: MessageSquare },
               { id: 'faqs', label: 'FAQs', icon: FileText },
               { id: 'students', label: 'Students', icon: Users },
-              { id: 'locations', label: 'Locations', icon: MapPin }
+              { id: 'locations', label: 'Locations', icon: MapPin },
+              { id: 'settings', label: 'Settings', icon: FileText }
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -1323,6 +1384,35 @@ export default function AdminPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Tab */}
+        {activeTab === 'settings' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900">App Settings</h2>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Skip offset (places to move token back)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={skipOffset}
+                    onChange={(e) => setSkipOffset(parseInt(e.target.value || '1'))}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
+                  />
+                </div>
+                <button
+                  onClick={saveSettings}
+                  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+                >
+                  Save Settings
+                </button>
               </div>
             </div>
           </div>

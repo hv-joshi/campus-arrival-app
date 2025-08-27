@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, getStudentProgress, TOTAL_STEPS, STEP_NAMES } from '@/lib/supabase';
 import { ArrowLeft, LogOut, Search, Users, CheckCircle, Clock, AlertCircle, BarChart3, RefreshCw, Ticket, FileText, ToggleLeft, ToggleRight, X, CheckSquare, Square } from 'lucide-react';
 import Link from 'next/link';
@@ -89,6 +89,8 @@ export default function VolunteerPage() {
   // Token assignment
   const [assigningToken, setAssigningToken] = useState(false);
   const [tokenQueue, setTokenQueue] = useState<{token: ApprovalToken, student: Student}[]>([]);
+  const [skipInProgress, setSkipInProgress] = useState(false);
+  const [skipOffset, setSkipOffset] = useState<number>(3);
 
   // Calculate and update token queue
   const updateTokenQueue = useCallback(() => {
@@ -110,11 +112,78 @@ export default function VolunteerPage() {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [documentChecks, setDocumentChecks] = useState<DocumentCheck[]>(LHC_DOCUMENTS);
   const [verifyingDocs, setVerifyingDocs] = useState(false);
+  const volunteerRef = useRef<Volunteer | null>(null);
+  useEffect(() => { volunteerRef.current = volunteer; }, [volunteer]);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchStudents();
       fetchApprovalTokens();
+      // Load settings (skip offset)
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('settings')
+            .select('skip_offset')
+            .limit(1)
+            .single();
+          if (data && typeof (data as any).skip_offset === 'number') {
+            setSkipOffset((data as any).skip_offset);
+          }
+        } catch (e) {
+          // Use default if settings table not present
+        }
+      })();
+
+      // Auto-refresh dashboard data every 1s
+      const interval = setInterval(() => {
+        fetchStudents();
+        fetchApprovalTokens();
+      }, 1000);
+
+      // Realtime updates for students and tokens
+      const channel: any = (supabase as any)
+        .channel('volunteer_realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'approval_tokens' },
+          () => {
+            fetchApprovalTokens();
+            const v = volunteerRef.current;
+            if (v?.can_verify_lhc && v?.is_available) {
+              checkAndAssignNextToken();
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'students' },
+          () => {
+            fetchStudents();
+          }
+        )
+        .subscribe();
+
+      // Refresh on window focus/visibility
+      const onFocus = () => {
+        fetchStudents();
+        fetchApprovalTokens();
+      };
+      const onVisibility = () => {
+        if (document.visibilityState === 'visible') {
+          fetchStudents();
+          fetchApprovalTokens();
+        }
+      };
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onVisibility);
+
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVisibility);
+        try { (supabase as any).removeChannel(channel); } catch {}
+      };
     }
   }, [isAuthenticated]);
 
@@ -173,20 +242,20 @@ export default function VolunteerPage() {
       ]);
       
       if (studentsResponse.data) {
-        const students = studentsResponse.data;
-        const tokens = tokensResponse.data || [];
+        const students: Student[] = studentsResponse.data as unknown as Student[];
+        const tokens: ApprovalToken[] = (tokensResponse.data || []) as unknown as ApprovalToken[];
         
         // Find students that need their token_assigned status fixed
-        const studentsToFix = students.filter(student => {
-          const hasToken = tokens.some(token => token.student_roll_no === student.iat_roll_no);
+        const studentsToFix = students.filter((student: Student) => {
+          const hasToken = tokens.some((token: ApprovalToken) => token.student_roll_no === student.iat_roll_no);
           return (hasToken && !student.token_assigned) || (!hasToken && student.token_assigned);
         });
 
         // Fix any inconsistencies
         if (studentsToFix.length > 0) {
           console.log('Fixing token_assigned status for', studentsToFix.length, 'students');
-          await Promise.all(studentsToFix.map(student => {
-            const hasToken = tokens.some(token => token.student_roll_no === student.iat_roll_no);
+          await Promise.all(studentsToFix.map((student: Student) => {
+            const hasToken = tokens.some((token: ApprovalToken) => token.student_roll_no === student.iat_roll_no);
             return supabase
               .from('students')
               .update({ token_assigned: hasToken })
@@ -282,10 +351,10 @@ export default function VolunteerPage() {
 
   // Check for next token assignment whenever tokens or volunteer status changes
   useEffect(() => {
-    if (volunteer?.can_verify_lhc) {
+    if (volunteer?.can_verify_lhc && volunteer?.is_available) {
       checkAndAssignNextToken();
     }
-  }, [volunteer?.is_available, approvalTokens.length]);
+  }, [volunteer?.is_available, approvalTokens]);
 
   // Update token queue whenever tokens or students change
   useEffect(() => {
@@ -324,13 +393,11 @@ export default function VolunteerPage() {
     setStepStats(stats);
   };
 
-  // Calculate students in queue (eligible for token assignment)
-  const studentsInQueue = students.filter(student => 
-    student.fees_paid && 
-    student.hostel_mess_status && 
-    student.insurance_status && 
-    !student.token_assigned
-  ).length;
+  // Verification queue count: tokens assigned but not picked by any volunteer and not verified
+  const studentsInQueue = approvalTokens.filter(token => {
+    const s = students.find(st => st.iat_roll_no === token.student_roll_no);
+    return s && !s.lhc_docs_status && !token.volunteer_id;
+  }).length;
 
   const toggleVolunteerAvailability = async () => {
     if (!volunteer) return;
@@ -377,28 +444,6 @@ export default function VolunteerPage() {
       // Check if student already has a token in approval_tokens table
       const existingToken = approvalTokens.find(t => t.student_roll_no === student.iat_roll_no);
       if (existingToken) {
-        // For LHC verifiers, allow them to claim unassigned tokens
-        if (volunteer.can_verify_lhc && volunteer.is_available && !existingToken.volunteer_id && !student.lhc_docs_status) {
-          // Claim this token for verification
-          const { error: updateError } = await supabase
-            .from('approval_tokens')
-            .update({ 
-              volunteer_id: volunteer.id,
-              is_processing: true 
-            })
-            .eq('id', existingToken.id);
-
-          if (updateError) {
-            setUpdateMessage({ type: 'error', message: 'Failed to claim token for verification' });
-            return;
-          }
-
-          // Update local state
-          await fetchApprovalTokens();
-          setUpdateMessage({ type: 'success', message: `Claimed Token #${existingToken.token_number} for verification` });
-          return;
-        }
-
         setUpdateMessage({ type: 'error', message: `Student already has Token #${existingToken.token_number} assigned` });
         return;
       }
@@ -483,6 +528,92 @@ export default function VolunteerPage() {
     }
   };
 
+  const skipCurrentAssignedToken = async () => {
+    if (!volunteer) return;
+    setSkipInProgress(true);
+    try {
+      // Find current assigned token for this volunteer where LHC not completed
+      const currentToken = approvalTokens.find(t => {
+        if (t.volunteer_id !== volunteer.id) return false;
+        const s = students.find(st => st.iat_roll_no === t.student_roll_no);
+        return s && !s.lhc_docs_status;
+      });
+      if (!currentToken) {
+        setUpdateMessage({ type: 'error', message: 'No assigned token to skip' });
+        return;
+      }
+
+      // Compute active queue (only tokens for students not yet LHC-verified), sorted
+      const activeQueue = approvalTokens.filter(t => {
+        const s = students.find(st => st.iat_roll_no === t.student_roll_no);
+        return s && !s.lhc_docs_status;
+      }).sort((a, b) => a.token_number - b.token_number);
+
+      const maxQueueTokenNumber = activeQueue.length > 0 
+        ? activeQueue[activeQueue.length - 1].token_number
+        : currentToken.token_number;
+
+      const currentIdx = activeQueue.findIndex(t => t.id === currentToken.id);
+      if (currentIdx === -1) {
+        setUpdateMessage({ type: 'error', message: 'Current token not found in active queue' });
+        return;
+      }
+
+      const targetIdx = Math.min(currentIdx + skipOffset, activeQueue.length - 1);
+      const targetNumber = targetIdx === activeQueue.length - 1
+        ? maxQueueTokenNumber + (currentIdx === activeQueue.length - 1 ? 0 : 1)
+        : activeQueue[targetIdx].token_number;
+
+      // Step 1: Move current token to a high temporary number to avoid unique conflicts
+      const tempNumber = maxQueueTokenNumber + 1000;
+      {
+        const { error: tempErr } = await supabase
+          .from('approval_tokens')
+          .update({ token_number: tempNumber, volunteer_id: null, is_processing: false })
+          .eq('id', currentToken.id);
+        if (tempErr) {
+          setUpdateMessage({ type: 'error', message: 'Failed to prepare token for skipping' });
+          return;
+        }
+      }
+
+      // Step 2: Shift affected tokens down by 1 in the target range (currentIdx+1..targetIdx)
+      for (let i = currentIdx + 1; i <= targetIdx && i < activeQueue.length; i++) {
+        const tok = activeQueue[i];
+        const { error: decErr } = await supabase
+          .from('approval_tokens')
+          .update({ token_number: tok.token_number - 1 })
+          .eq('id', tok.id);
+        if (decErr) {
+          setUpdateMessage({ type: 'error', message: 'Failed to rebalance queue while skipping' });
+          return;
+        }
+      }
+
+      // Step 3: Place current token at targetNumber
+      {
+        const { error: placeErr } = await supabase
+          .from('approval_tokens')
+          .update({ token_number: targetNumber })
+          .eq('id', currentToken.id);
+        if (placeErr) {
+          setUpdateMessage({ type: 'error', message: 'Failed to move token to target position' });
+          return;
+        }
+      }
+
+      await fetchApprovalTokens();
+      const movedToEnd = targetIdx === activeQueue.length - 1;
+      setUpdateMessage({ type: 'success', message: movedToEnd ? 'Moved token to end of queue' : `Skipped token by ${skipOffset} places` });
+      // Try auto-assign next if still available
+      await checkAndAssignNextToken();
+    } catch (e) {
+      setUpdateMessage({ type: 'error', message: 'Skip action failed' });
+    } finally {
+      setSkipInProgress(false);
+    }
+  };
+
   const openLhcModal = (student: Student) => {
     setSelectedStudent(student);
     setDocumentChecks(LHC_DOCUMENTS.map(doc => ({ ...doc, checked: false, missing: false, notes: '' })));
@@ -503,13 +634,8 @@ export default function VolunteerPage() {
     ));
   };
 
-  const updateDocumentNotes = (docId: string, notes: string) => {
-    setDocumentChecks(prev => prev.map(doc => 
-      doc.id === docId 
-        ? { ...doc, notes }
-        : doc
-    ));
-  };
+  // Notes input removed from UI; keep placeholder to avoid breaking state shape if referenced
+  const updateDocumentNotes = () => {};
 
   const verifyLhcDocuments = async () => {
     if (!selectedStudent) return;
@@ -537,20 +663,10 @@ export default function VolunteerPage() {
         return;
       }
 
-      // Update student LHC docs status
+      // Update student LHC docs status (only this field to avoid schema mismatch)
       const { error } = await supabase
         .from('students')
-        .update({ 
-          lhc_docs_status: true,
-          verified_docs: {
-            ...selectedStudent.verified_docs,
-            lhc_verification: {
-              verified_at: new Date().toISOString(),
-              documents: documentChecks,
-              verified_by: volunteer?.username
-            }
-          }
-        })
+        .update({ lhc_docs_status: true })
         .eq('id', selectedStudent.id);
 
       if (error) {
@@ -564,20 +680,12 @@ export default function VolunteerPage() {
         s.id === selectedStudent.id 
           ? { 
               ...s, 
-              lhc_docs_status: true,
-              verified_docs: {
-                ...s.verified_docs,
-                lhc_verification: {
-                  verified_at: new Date().toISOString(),
-                  documents: documentChecks,
-                  verified_by: volunteer?.username
-                }
-              }
+              lhc_docs_status: true
             }
           : s
       ));
 
-      // Clear volunteer assignment from the completed token
+      // Release any token assigned to this volunteer for this student, then auto-assign next
       const completedToken = approvalTokens.find(t => t.student_roll_no === selectedStudent.iat_roll_no);
       if (completedToken) {
         const { error: tokenError } = await supabase
@@ -587,16 +695,13 @@ export default function VolunteerPage() {
             is_processing: false
           })
           .eq('id', completedToken.id);
-
         if (tokenError) {
           console.error('Error updating token assignment:', tokenError);
         }
       }
-
-      // Refresh tokens to get latest state
+      // Refresh server state before selecting next token
       await fetchApprovalTokens();
-
-      // Try to assign next token automatically
+      // Re-check and assign next token immediately using fresh state
       await checkAndAssignNextToken();
 
       setUpdateMessage({ 
@@ -836,6 +941,37 @@ export default function VolunteerPage() {
                   </button>
                 </div>
               )}
+              {volunteer?.can_verify_lhc && (
+                (() => {
+                  const assigned = approvalTokens.find(t => {
+                    if (t.volunteer_id !== volunteer.id) return false;
+                    const s = students.find(st => st.iat_roll_no === t.student_roll_no);
+                    return s && !s.lhc_docs_status;
+                  });
+                  if (!assigned) return null;
+                  const s = students.find(st => st.iat_roll_no === assigned.student_roll_no);
+                  return (
+                    <div className="ml-4 flex items-center space-x-3 px-3 py-2 rounded-lg bg-orange-50 border border-orange-200">
+                      <span className="text-sm font-semibold text-orange-800">Assigned Token #{assigned.token_number}</span>
+                      {s && <span className="text-xs text-orange-700">{s.student_name}</span>}
+                      <button
+                        onClick={() => s && openLhcModal(s)}
+                        className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
+                      >
+                        Open LHC
+                      </button>
+                      <button
+                        onClick={skipCurrentAssignedToken}
+                        disabled={skipInProgress}
+                        className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                        title={`Move back by ${skipOffset}`}
+                      >
+                        {skipInProgress ? 'Skipping...' : 'Skip'}
+                      </button>
+                    </div>
+                  );
+                })()
+              )}
               
               <button
                 onClick={() => {
@@ -1012,26 +1148,19 @@ export default function VolunteerPage() {
                                   Token #{existingToken.token_number}
                                 </span>
                                 {volunteer?.can_verify_lhc && (
-                                  <>
-                                    {existingToken.volunteer_id === volunteer.id && (
-                                      <span className="text-xs text-blue-600">
-                                        Assigned to you for verification
-                                      </span>
-                                    )}
-                                    {!existingToken.volunteer_id && !student.lhc_docs_status && volunteer.is_available && (
-                                      <button
-                                        onClick={() => assignTokenToStudent(student)}
-                                        className="text-xs text-blue-600 underline hover:text-blue-800"
-                                      >
-                                        Claim for verification
-                                      </button>
-                                    )}
-                                    {existingToken.volunteer_id && existingToken.volunteer_id !== volunteer.id && (
-                                      <span className="text-xs text-gray-500">
-                                        Being verified by another volunteer
-                                      </span>
-                                    )}
-                                  </>
+                                  (() => {
+                                    const s = students.find(st => st.iat_roll_no === student.iat_roll_no);
+                                    if (s?.lhc_docs_status) {
+                                      return <span className="text-xs text-green-700">Done</span>;
+                                    }
+                                    if (existingToken.volunteer_id === volunteer.id) {
+                                      return <span className="text-xs text-blue-600">Assigned to you for verification</span>;
+                                    }
+                                    if (existingToken.volunteer_id && existingToken.volunteer_id !== volunteer.id) {
+                                      return <span className="text-xs text-gray-500">Being verified by another volunteer</span>;
+                                    }
+                                    return <span className="text-xs text-gray-500">Waiting</span>;
+                                  })()
                                 )}
                               </div>
                             );
@@ -1100,17 +1229,13 @@ export default function VolunteerPage() {
                       <div className="flex items-center space-x-2">
                         {volunteer?.can_verify_lhc ? (
                           <>
-                            <button
-                              onClick={() => updateStudentStep(student.id, 'lhc_docs_status', !student.lhc_docs_status)}
-                              disabled={updatingStudent === student.id}
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                student.lhc_docs_status
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}
-                            >
-                              {updatingStudent === student.id ? 'Updating...' : (student.lhc_docs_status ? '✓' : 'Pending')}
-                            </button>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              student.lhc_docs_status
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {student.lhc_docs_status ? '✓' : 'Pending'}
+                            </span>
                             {!student.lhc_docs_status && (
                               <button
                                 onClick={() => openLhcModal(student)}
@@ -1208,34 +1333,7 @@ export default function VolunteerPage() {
                           )}
                         </div>
                         
-                        {doc.checked && (
-                          <div className="mt-3 space-y-2">
-                            <div className="flex items-center space-x-3">
-                              <label className="flex items-center space-x-2">
-                                <input
-                                  type="checkbox"
-                                  checked={doc.missing}
-                                  onChange={() => toggleDocumentCheck(doc.id, 'missing')}
-                                  className="rounded border-gray-300 text-red-600 focus:ring-red-500"
-                                />
-                                <span className="text-sm text-gray-700">Document Missing</span>
-                              </label>
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Notes (optional)
-                              </label>
-                              <textarea
-                                value={doc.notes}
-                                onChange={(e) => updateDocumentNotes(doc.id, e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                rows={2}
-                                placeholder="Add any notes about this document..."
-                              />
-                            </div>
-                          </div>
-                        )}
+                        {doc.checked && null}
                       </div>
                     </div>
                   </div>
@@ -1245,13 +1343,7 @@ export default function VolunteerPage() {
             
             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
               <div className="flex items-center justify-between">
-                <div className="text-sm text-gray-600">
-                  {documentChecks.filter(d => d.checked && d.missing && d.required).length > 0 && (
-                    <span className="text-red-600 font-medium">
-                      ⚠️ Required documents are missing
-                    </span>
-                  )}
-                </div>
+                <div className="text-sm text-gray-600" />
                 <div className="flex items-center space-x-3">
                   <button
                     onClick={closeLhcModal}
@@ -1261,7 +1353,7 @@ export default function VolunteerPage() {
                   </button>
                   <button
                     onClick={verifyLhcDocuments}
-                    disabled={verifyingDocs || documentChecks.filter(d => d.checked && d.missing && d.required).length > 0}
+                    disabled={verifyingDocs}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {verifyingDocs ? 'Verifying...' : 'Verify Documents'}
